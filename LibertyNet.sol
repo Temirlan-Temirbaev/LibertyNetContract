@@ -112,4 +112,10 @@ contract SecureMessage {
         return result;
     }
 
+    function getUsers() public view {
+        return users[msg.sender];
+    }
+
+    function get
+
 }
