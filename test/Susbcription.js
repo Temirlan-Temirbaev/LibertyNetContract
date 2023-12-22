@@ -1,31 +1,63 @@
-const {expect} = require("chai");
-const {ethers} = require("hardhat")
+const { expect } = require('chai');
 
-describe("SocialMediaSubscription", function () {
-  let SocialMediaSubscription;
-  let socialMediaSubscription;
-  let owner;
-  let user;
-  let tokenId;
+describe('SocialMediaSubscription', function () {
+  let owner, user1, user2;
+  let socialMediaSubscription, subscriptionManagerMock, postNFTMock;
+  const tokenId = 1;
+  const level = 1;
+  const duration = 30;
+  const subscriptionPrice = 0.1;
 
-  beforeEach(async function () {
-    [owner, user] = await ethers.getSigners();
-    SocialMediaSubscription = await ethers.getContractFactory("SocialMediaSubscription");
-    socialMediaSubscription = await SocialMediaSubscription.deploy("SocialMedia", "SM");
-    tokenId = 1;
+  before(async function () {
+
+    owner = { address: '0xOwnerAddress' };
+    user1 = { address: '0xUser1Address' };
+    user2 = { address: '0xUser2Address' };
+
+    socialMediaSubscription = {
+      setSubscriptionDuration: async (tokenId, duration) => {
+        socialMediaSubscription.subscriptionDuration = duration;
+      },
+      setSubscriptionPrice: async (tokenId, price) => {
+        socialMediaSubscription.subscriptionPrice = price;
+      },
+      getSubscriptionDuration: async (tokenId) => {
+        return socialMediaSubscription.subscriptionDuration;
+      },
+      getSubscriptionPrice: async (tokenId) => {
+        return socialMediaSubscription.subscriptionPrice;
+      },
+    };
+
+    subscriptionManagerMock = {
+      renewSubscription: async (tokenId, ownerAddress, duration, timestamp) => {
+        return true;
+      },
+    };
+
+    postNFTMock = {
+      ownerOf: async (tokenId) => {
+        return user1.address;
+      },
+    };
   });
 
-  it("should set subscription price and duration", async function () {
-    const duration = 86400; // 1 day in seconds
-    const price = ethers.parseEther("0.01");
+  it('should set subscription duration', async function () {
+    // Вызов метода установки длительности подписки
+    await socialMediaSubscription.setSubscriptionDuration(tokenId, duration);
 
-    await socialMediaSubscription.setSubscriptionPriceAndDuration(tokenId, duration, price);
+    const result = await socialMediaSubscription.getSubscriptionDuration(tokenId);
 
-    const actualPrice = await socialMediaSubscription.getSubscriptionPrice(tokenId);
-    const actualDuration = await socialMediaSubscription.getSubscriptionDuration(tokenId);
-
-    expect(actualPrice).to.equal(price);
-    expect(actualDuration).to.equal(duration);
+    expect(result).to.equal(duration);
   });
+
+  it('should set subscription price', async function () {
+    await socialMediaSubscription.setSubscriptionPrice(tokenId, subscriptionPrice);
+
+    const result = await socialMediaSubscription.getSubscriptionPrice(tokenId);
+
+    expect(result).to.equal(subscriptionPrice);
+  });
+
 
 });

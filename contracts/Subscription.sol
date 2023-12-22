@@ -2,139 +2,95 @@
 
 pragma solidity ^0.8.0;
 
-import {ERC721Enumerable} from "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
-import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "./SubscriptionManager.sol";
+import "./LibertyNetPost.sol";
 
 contract SocialMediaSubscription is ERC721Enumerable, Ownable {
-
     ISubscriptionManager private _subscriptionManager;
-
-    mapping(uint256 => uint256) private _subscriptionPrices;
+    PostNFT private _postNFT;
 
     mapping(uint256 => uint64) private _subscriptionDurations;
-
+    mapping(uint256 => uint256) private _subscriptionPrices;
     mapping(uint256 => uint256) private _totalSubscriptions;
 
     uint256 private constant OWNER_PERCENTAGE = 3;
 
-    struct SubscriptionParams {
-        uint64 duration;
-        uint256 price;
-    }
-
-    mapping(uint256 => SubscriptionParams) private _subscriptionParams;
-
-    event PostCreated(uint256 indexed tokenId, string tokenURI, uint64 duration, uint256 price);
-
-    constructor(string memory name_, string memory symbol_)
-    ERC721(name_, symbol_)
-    Ownable(msg.sender)
-    {
+    constructor(
+        string memory name_,
+        string memory symbol_,
+        address postNFTAddress
+    ) ERC721(name_, symbol_) Ownable(msg.sender) {
         _subscriptionManager = new SubscriptionManager();
+        _postNFT = PostNFT(postNFTAddress);
     }
 
-    modifier onlyContractOwner() {
-        require(_msgSender() == owner(), "Caller is not the contract owner");
+    modifier postExists(uint256 tokenId) {
+        require(ownerOf(tokenId) != address(0), "Invalid post ID");
         _;
     }
 
-    function _exists(uint256 tokenId) internal view returns (bool) {
-        return _exists(tokenId);
-    }
 
-    /**
-     * @dev Set the subscription price and duration for a post.
-     * @param tokenId The ID of the post (NFT).
-     * @param duration The duration of the subscription in seconds.
-     * @param price The price of the subscription in ETH.
-     */
-    function setSubscriptionPriceAndDuration(
-        uint256 tokenId,
-        uint64 duration,
-        uint256 price
-    ) external onlyContractOwner {
-        _subscriptionPrices[tokenId] = price;
+    function setSubscriptionDuration(uint256 tokenId, uint64 duration) external postExists(tokenId) {
+        require(duration == 30 || duration == 90 || duration == 180 || duration == 365, "Invalid duration");
+        require(!_subscriptionManager.isSubscriptionActive(tokenId, ownerOf(tokenId)), "Subscription already active");
+
         _subscriptionDurations[tokenId] = duration;
     }
 
-    /**
-     * @dev Get the subscription price for a post.
-     * @param tokenId The ID of the post (NFT).
-     * @return The price of the subscription in ETH.
-     */
-    function getSubscriptionPrice(uint256 tokenId) external view returns (uint256) {
-        return _subscriptionPrices[tokenId];
-    }
 
-    /**
-     * @dev Get the subscription end time for a post.
-     * @param tokenId The ID of the post (NFT).
-     * @return The end time of the subscription in seconds.
-     */
-    function getSubscriptionEndTime(uint256 tokenId) external view returns (uint256) {
-        return _subscriptionManager.getSubscriptionEndTime(tokenId);
-    }
-
-    /**
-     * @dev Get the subscription duration for a post.
-     * @param tokenId The ID of the post (NFT).
-     * @return The duration of the subscription in seconds.
-     */
-    function getSubscriptionDuration(uint256 tokenId) external view returns (uint64) {
+    function getSubscriptionDuration(uint256 tokenId) external view postExists(tokenId) returns (uint64) {
         return _subscriptionDurations[tokenId];
     }
 
-    /**
-     * @dev Purchase a subscription for a post.
-     * @param tokenId The ID of the post (NFT).
-     * @param level The subscription level (month, three months, six months, year).
-     */
-    function purchaseSubscription(uint256 tokenId, uint256 level) external payable {
-        require(_exists(tokenId), "Invalid post ID");
-        require(msg.value >= _getSubscriptionPrice(tokenId, level), "Insufficient payment");
+    function setSubscriptionPrice(uint256 tokenId, uint256 newPrice) external postExists(tokenId) {
+        require(_postNFT.ownerOf(tokenId) == msg.sender, "Only the post author can set the subscription price");
+        _subscriptionPrices[tokenId] = newPrice;
+    }
 
-        uint64 duration = _getSubscriptionDuration(tokenId, level);
+    function purchaseSubscription(uint256 tokenId, uint256 level, uint64 duration) external payable postExists(tokenId) {
+        require(msg.value >= _subscriptionPrices[tokenId] * level, "Insufficient payment");
+        require(!_subscriptionManager.isSubscriptionActive(tokenId, ownerOf(tokenId)), "Subscription already active");
+
         bool renewed = _subscriptionManager.renewSubscription(tokenId, ownerOf(tokenId), duration, block.timestamp);
 
         if (renewed) {
             _totalSubscriptions[tokenId]++;
             _transferFundsToOwner(msg.value);
-        } else {
-            revert("Subscription renewal failed"); // Add a reason for revert
         }
     }
 
-    /**
-     * @dev Internal function to calculate the subscription price based on the level.
-     * @param tokenId The ID of the post (NFT).
-     * @param level The subscription level (month, three months, six months, year).
-     * @return The calculated subscription price in ETH.
-     */
-    function _getSubscriptionPrice(uint256 tokenId, uint256 level) internal view returns (uint256) {
-        require(level <= 4, "Invalid subscription level");
-        uint256 basePrice = _subscriptionPrices[tokenId];
-        return basePrice * level;
+    function getUserSubscriptions() external view returns (uint256[] memory) {
+        uint256[] memory subscriptions = new uint256[](balanceOf(msg.sender));
+        uint256 count = 0;
+
+        for (uint256 i = 0; i < totalSupply(); i++) {
+            uint256 tokenId = tokenByIndex(i);
+            if (_subscriptionManager.isSubscriptionActive(tokenId, msg.sender)) {
+                subscriptions[count] = tokenId;
+                count++;
+            }
+        }
+
+        assembly {
+            mstore(subscriptions, count)
+        }
+
+        return subscriptions;
     }
 
-    /**
-     * @dev Internal function to get the subscription duration based on the level.
-     * @param tokenId The ID of the post (NFT).
-     * @param level The subscription level (month, three months, six months, year).
-     * @return The calculated subscription duration in seconds.
-     */
     function _getSubscriptionDuration(uint256 tokenId, uint256 level) internal view returns (uint64) {
-        require(level <= 4, "Invalid subscription level");
-        return uint64(_subscriptionDurations[tokenId] * level);
+        require(level >= 1 && level <= 4, "Invalid subscription level");
+        return _subscriptionDurations[tokenId] * uint64(level);
     }
 
-    /**
-     * @dev Internal function to transfer funds to the contract owner.
-     * @param amount The amount of funds to transfer.
-     */
     function _transferFundsToOwner(uint256 amount) internal {
-        uint256 ownerAmount = (amount * OWNER_PERCENTAGE) / 100;
+        uint256 ownerAmount = amount * OWNER_PERCENTAGE / 100;
         payable(owner()).transfer(ownerAmount);
+    }
+
+    function checkSubscriptionStatus(uint256 tokenId) external view postExists(tokenId) returns (bool) {
+        return _subscriptionManager.isSubscriptionActive(tokenId, ownerOf(tokenId));
     }
 }
